@@ -1,0 +1,68 @@
+# .github/workflows/likumi.yml
+#
+# This file tells GitHub Actions when and how to run our script.
+# GitHub runs the script on a free cloud computer every day.
+# Prefect Cloud receives the results and shows them in its UI.
+#
+# How to add secret keys:
+#   GitHub repo → Settings → Secrets and variables → Actions → New secret
+
+name: Likumi.lv Daily Monitor
+
+on:
+  # Run every day at 06:00 UTC = 08:00 Riga time (UTC+2 in summer)
+  # Cron format: minute | hour | day of month | month | day of week
+  schedule:
+    - cron: "0 6 * * *"
+
+  # Also allow manual runs from the GitHub website
+  # Go to: Actions tab → select this workflow → click "Run workflow"
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    # Use a free Ubuntu Linux virtual machine
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Download our code from the repository onto the virtual machine
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Install Python 3.11 on the virtual machine
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Step 3: Install all required Python packages
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Step 4: Load the seen_laws.json file from cache.
+      # Without this the script would treat all laws as new on every run.
+      - name: Restore seen laws cache
+        uses: actions/cache@v4
+        with:
+          path: seen_laws.json             # the file we want to keep between runs
+          key: seen-laws-${{ runner.os }}  # unique name for this cache entry
+
+      # Step 5: Run the main script.
+      # Secret keys are injected as environment variables — never visible in logs.
+      # PREFECT_API_URL and PREFECT_API_KEY connect the run to Prefect Cloud UI.
+      - name: Run Likumi monitor
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          PREFECT_API_URL: ${{ secrets.PREFECT_API_URL }}
+          PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY }}
+        run: python likumi_monitor.py
+
+      # Step 6: Save the updated seen_laws.json back to cache.
+      # This file persists between runs so deduplication works correctly.
+      - name: Save seen laws cache
+        uses: actions/cache@v4
+        with:
+          path: seen_laws.json
+          key: seen-laws-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: seen-laws-${{ runner.os }}
