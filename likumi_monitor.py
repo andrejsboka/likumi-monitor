@@ -5,13 +5,9 @@ This script checks the Latvian law website (likumi.lv) every day.
 It finds new laws, analyzes them with Google Gemini AI,
 and sends a daily summary to a Discord channel.
 
-This version uses Prefect for scheduling and orchestration.
-Each function is a Prefect task. The main function is a Prefect flow.
-
-How to deploy to Prefect Cloud:
-    1. pip install prefect google-generativeai requests beautifulsoup4
-    2. prefect cloud login
-    3. python likumi_monitor.py
+How it runs:
+- GitHub Actions triggers this script every day on a schedule
+- Prefect Cloud tracks every run, shows logs and status in the UI
 
 Required packages:
     pip install prefect requests beautifulsoup4 google-generativeai
@@ -31,11 +27,16 @@ import google.generativeai as genai
 # SETTINGS
 # These values come from environment variables.
 # Never put real API keys directly in code.
-# In Prefect Cloud: go to Settings → Variables or use Prefect Blocks
+# In GitHub: go to Settings → Secrets → Actions → New secret
 # ──────────────────────────────────────────────
 
 GEMINI_API_KEY  = os.environ["GEMINI_API_KEY"]       # key from Google AI Studio
 DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK_URL"]  # webhook URL from Discord
+
+# Prefect Cloud connection — get this from app.prefect.cloud → Settings → API Keys
+# Set it as PREFECT_API_KEY secret in GitHub
+PREFECT_API_URL = os.environ.get("PREFECT_API_URL", "")  # your Prefect workspace URL
+PREFECT_API_KEY = os.environ.get("PREFECT_API_KEY", "")  # your Prefect API key
 
 LIKUMI_URL = "https://likumi.lv/ta/jaunie"  # page that lists new laws
 SEEN_FILE  = "seen_laws.json"               # file that stores already processed laws
@@ -73,7 +74,6 @@ def fetch_laws() -> list[dict]:
 
     retries=3 means Prefect will try again up to 3 times if this task fails.
     retry_delay_seconds=30 means it waits 30 seconds between retries.
-    This is useful if the website is temporarily unavailable.
     """
     logger = get_run_logger()
 
@@ -190,8 +190,6 @@ def analyze_with_gemini(law: dict) -> dict:
     """
     Sends the law title to Google Gemini AI.
     Returns a dict with: summary, sector, relevance, relevance_reason, keywords.
-
-    retries=2 means Prefect will retry if the Gemini API is temporarily unavailable.
     """
     logger = get_run_logger()
 
@@ -252,8 +250,6 @@ def send_to_discord(results: list[dict]):
     Builds a Discord embed message and sends it via webhook.
     Discord supports 'embeds' — rich cards with colors, fields, and links.
     One message can have up to 10 embeds total.
-
-    retries=3 means Prefect will retry if Discord is temporarily unavailable.
     """
     logger = get_run_logger()
     today  = date.today().strftime("%d.%m.%Y")
@@ -353,15 +349,16 @@ def send_no_news():
 
 # ──────────────────────────────────────────────
 # MAIN FLOW
-# Prefect flow — connects all tasks in the correct order.
-# Prefect Cloud will show each task as a separate step in the UI.
+# @flow tells Prefect to track this as one workflow.
+# GitHub Actions runs this file. Prefect Cloud records the result.
 # ──────────────────────────────────────────────
 
 @flow(name="likumi-monitor", log_prints=True)
 def likumi_monitor_flow():
     """
     Main Prefect flow. Runs all tasks in order.
-    Prefect Cloud tracks every run, shows logs, and sends alerts on failure.
+    Prefect Cloud tracks every run, shows logs and task status in the UI.
+    GitHub Actions triggers this flow every day on a schedule.
     """
 
     # Task 1: Get all laws from the website
@@ -403,17 +400,7 @@ def likumi_monitor_flow():
     print(f"Done. Processed {len(new_laws)} new laws.")
 
 
-# ──────────────────────────────────────────────
-# DEPLOYMENT
-# This block runs when you execute the file directly.
-# serve() connects this flow to Prefect Cloud and sets a schedule.
-# After running this once, Prefect Cloud will trigger it automatically.
-# ──────────────────────────────────────────────
-
+# GitHub Actions runs this file directly — so we call the flow here.
+# No serve() needed — GitHub Actions handles the schedule.
 if __name__ == "__main__":
-    likumi_monitor_flow.serve(
-        name="likumi-daily",
-        # Run every day at 08:00 Riga time (06:00 UTC)
-        # Cron format: minute | hour | day | month | weekday
-        cron="0 6 * * *"
-    )
+    likumi_monitor_flow()
