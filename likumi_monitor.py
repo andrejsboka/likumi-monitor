@@ -107,6 +107,11 @@ def fetch_laws() -> list[dict]:
         if len(title) < 10:
             continue
 
+        # Skip "Latvijas Vēstnesis" — this is the name of the gazette (newspaper),
+        # not an actual law. It appears as a link on every entry on the page.
+        if title.strip() == "Latvijas Vēstnesis":
+            continue
+
         # Build a full URL if the href is a relative path like /ta/id/123
         if href.startswith("/"):
             full_url = "https://likumi.lv" + href
