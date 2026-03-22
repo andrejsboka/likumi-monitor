@@ -16,6 +16,7 @@ Required packages:
 import os
 import json
 import hashlib
+import time
 import requests
 from datetime import date, datetime
 from bs4 import BeautifulSoup
@@ -217,6 +218,12 @@ def analyze_with_gemini(law: dict) -> dict:
         # Parse the JSON string into a Python dict
         analysis = json.loads(text)
         logger.info(f"Done: {law['title'][:60]}...")
+
+        # Wait 5 seconds before the next request.
+        # Free tier allows 15 requests per minute = 1 request per 4 seconds.
+        # We use 5 seconds to stay safely under the limit.
+        time.sleep(5)
+
         return analysis
 
     except Exception as e:
