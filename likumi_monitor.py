@@ -77,6 +77,8 @@ def fetch_laws_for_date(check_date: date) -> list[dict]:
     response = requests.get(url, headers=headers, timeout=20)
     response.raise_for_status()
 
+    # Force UTF-8 encoding — the site uses UTF-8 but requests sometimes guesses wrong
+    response.encoding = "utf-8"
     soup = BeautifulSoup(response.text, "html.parser")
     laws = []
 
