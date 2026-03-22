@@ -197,7 +197,7 @@ def analyze_with_gemini(law: dict) -> dict:
     genai.configure(api_key=GEMINI_API_KEY)
 
     # Use the fast free model — good enough for text analysis
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.0-flash")
 
     # Fill in the law title and URL into our prompt template
     prompt = GEMINI_PROMPT.format(title=law["title"], url=law["url"])
@@ -244,90 +244,94 @@ RELEVANCE_EMOJI = {
 }
 
 
-@task(name="send-to-discord", retries=3, retry_delay_seconds=15)
-def send_to_discord(results: list[dict]):
+def build_law_embed(item: dict) -> dict:
     """
-    Builds a Discord embed message and sends it via webhook.
-    Discord supports 'embeds' — rich cards with colors, fields, and links.
-    One message can have up to 10 embeds total.
+    Builds one Discord embed card for a single law.
+    This is a plain function — not a Prefect task.
+    It is called inside send_to_discord.
     """
-    logger = get_run_logger()
-    today  = date.today().strftime("%d.%m.%Y")
-    count  = len(results)
+    law      = item["law"]
+    analysis = item["analysis"]
 
-    # First embed — the daily header card
-    header_embed = {
-        "title":       f"📋 Likumi.lv digest — {today}",
-        "description": f"**{count}** new laws found today",
-        "color":       0x3498DB,  # blue
-        "timestamp":   datetime.utcnow().isoformat() + "Z",
-        "footer":      {"text": "likumi.lv monitor · automatic daily check"}
+    relevance = analysis.get("relevance", "low")
+    emoji     = RELEVANCE_EMOJI.get(relevance, "⚪")
+    color     = RELEVANCE_COLOR.get(relevance, 0x95A5A6)
+    keywords  = ", ".join(analysis.get("keywords", []))
+
+    return {
+        # Clicking the title in Discord opens the law on likumi.lv
+        "title":       f"{emoji} {law['title'][:200]}",
+        "url":         law["url"],
+        "description": analysis.get("summary", ""),
+        "color":       color,
+        "fields": [
+            {"name": "Sector",       "value": analysis.get("sector", "—"),                    "inline": True},
+            {"name": "Relevance",    "value": f"{emoji} {relevance}",                         "inline": True},
+            {"name": "Keywords",     "value": keywords if keywords else "—",                  "inline": False},
+            {"name": "Why it matters","value": analysis.get("relevance_reason", "—")[:500],   "inline": False}
+        ]
     }
 
-    embeds = [header_embed]
 
-    # One embed card per law (max 9 laws + 1 header = 10 total)
-    for item in results[:9]:
-        law      = item["law"]
-        analysis = item["analysis"]
-
-        relevance = analysis.get("relevance", "low")
-        emoji     = RELEVANCE_EMOJI.get(relevance, "⚪")
-        color     = RELEVANCE_COLOR.get(relevance, 0x95A5A6)
-        keywords  = ", ".join(analysis.get("keywords", []))
-
-        embed = {
-            # Clicking the title in Discord opens the law on likumi.lv
-            "title":       f"{emoji} {law['title'][:200]}",
-            "url":         law["url"],
-            "description": analysis.get("summary", ""),
-            "color":       color,
-            "fields": [
-                {
-                    "name":   "Sector",
-                    "value":  analysis.get("sector", "—"),
-                    "inline": True
-                },
-                {
-                    "name":   "Relevance",
-                    "value":  f"{emoji} {relevance}",
-                    "inline": True
-                },
-                {
-                    "name":   "Keywords",
-                    "value":  keywords if keywords else "—",
-                    "inline": False
-                },
-                {
-                    "name":   "Why it matters",
-                    "value":  analysis.get("relevance_reason", "—")[:500],
-                    "inline": False
-                }
-            ]
-        }
-        embeds.append(embed)
-
-    # If there are more than 9 laws, add a "see more" link at the end
-    if count > 9:
-        embeds.append({
-            "description": f"...and {count - 9} more. [See all on likumi.lv]({LIKUMI_URL})",
-            "color":       0x3498DB
-        })
-
-    # Send the POST request to Discord
+def post_embeds_to_discord(embeds: list[dict]):
+    """
+    Sends one POST request to Discord with a list of embeds.
+    Max 10 embeds per request — Discord will reject more.
+    """
     response = requests.post(
         DISCORD_WEBHOOK,
         json={"embeds": embeds},
         headers={"Content-Type": "application/json"},
         timeout=15
     )
+    if response.status_code != 204:
+        raise requests.HTTPError(f"Discord error {response.status_code}: {response.text}")
 
-    # Discord returns 204 (No Content) when the message is sent OK
-    if response.status_code == 204:
-        logger.info("Message sent to Discord successfully!")
-    else:
-        logger.error(f"Discord error {response.status_code}: {response.text}")
-        response.raise_for_status()
+
+@task(name="send-to-discord", retries=3, retry_delay_seconds=15)
+def send_to_discord(results: list[dict]):
+    """
+    Sends all laws to Discord. Splits into multiple messages if needed.
+    Discord allows max 10 embeds per message (1 header + 9 laws).
+    Example: 20 laws → message 1 has 9, message 2 has 9, message 3 has 2.
+
+    retries=3 means Prefect will retry if Discord is temporarily unavailable.
+    """
+    logger = get_run_logger()
+    today  = date.today().strftime("%d.%m.%Y")
+    count  = len(results)
+
+    # Build all law embed cards
+    all_embeds = [build_law_embed(item) for item in results]
+
+    # Split into groups of 9 (each group + 1 header = 10 max per message)
+    chunk_size = 9
+    chunks = [all_embeds[i:i + chunk_size] for i in range(0, len(all_embeds), chunk_size)]
+
+    for index, chunk in enumerate(chunks):
+
+        # First message gets the main header with total count
+        if index == 0:
+            header = {
+                "title":       f"📋 Likumi.lv digest — {today}",
+                "description": f"**{count}** new laws found today",
+                "color":       0x3498DB,
+                "timestamp":   datetime.utcnow().isoformat() + "Z",
+                "footer":      {"text": "likumi.lv monitor · automatic daily check"}
+            }
+        else:
+            # Later messages get a simpler "continued" header
+            header = {
+                "title":       f"📋 Likumi.lv digest — {today} (part {index + 1})",
+                "description": f"Laws {index * chunk_size + 1}–{index * chunk_size + len(chunk)}",
+                "color":       0x3498DB
+            }
+
+        # Send: 1 header + up to 9 law cards = max 10 embeds
+        post_embeds_to_discord([header] + chunk)
+        logger.info(f"Sent part {index + 1}/{len(chunks)} to Discord")
+
+    logger.info(f"Done — {count} laws sent to Discord.")
 
 
 @task(name="send-no-news")
