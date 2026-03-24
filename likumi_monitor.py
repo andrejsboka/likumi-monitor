@@ -194,7 +194,7 @@ def analyze_with_gemini(law: dict) -> dict:
     """
     logger = get_run_logger()
     genai.configure(api_key=GEMINI_API_KEY)
-    model  = genai.GenerativeModel("gemini-2.0-flash")
+    model  = genai.GenerativeModel("gemini-2.5-flash")
     prompt = GEMINI_PROMPT.format(title=law["title"], url=law["url"])
 
     try:
