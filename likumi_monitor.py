@@ -40,8 +40,8 @@ LIKUMI_MOBILE_URL = "https://m.likumi.lv/jaunakie.php"
 SEEN_FILE = "seen_laws.json"  # stores IDs of already processed laws
 
 GEMINI_PROMPT = """
-You are an expert in Latvian law and an IT security auditor assistant.
-Read this law title and give a short analysis.
+You answer in Latvian. You are an expert in Latvian law and an IT security auditor assistant.
+Read this law title and look into the linked text of the law and give a short analysis.
 Reply ONLY with valid JSON, no extra text, no markdown.
 
 Law title: {title}
