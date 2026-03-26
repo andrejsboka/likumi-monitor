@@ -267,7 +267,7 @@ def build_law_embed(item: dict) -> dict:
 def post_embeds_to_discord(embeds: list[dict]):
     """
     Sends one POST request to Discord with a list of embeds.
-    Discord allows max 10 embeds per message.
+    Discord allows max 10 embeds per message and 6000 total characters.
     """
     response = requests.post(
         DISCORD_WEBHOOK,
@@ -282,40 +282,38 @@ def post_embeds_to_discord(embeds: list[dict]):
 @task(name="send-to-discord", retries=3, retry_delay_seconds=15)
 def send_to_discord(results: list[dict], laws_date: str):
     """
-    Sends all laws to Discord. Splits into multiple messages if needed.
-    Discord allows max 10 embeds per message (1 header + 9 laws).
+    Sends all laws to Discord.
+    Each law is sent as a separate message to avoid Discord 6000 char limit.
+    First sends a header with the total count, then one message per law.
     """
     logger = get_run_logger()
     today  = date.today().strftime("%d.%m.%Y")
     count  = len(results)
 
-    # Build all law embed cards
-    all_embeds = [build_law_embed(item) for item in results]
+    # Send the header message first
+    note = f"\n_(Laws from {laws_date} — most recent available)_" if laws_date != today else ""
+    header_embed = {
+        "title":       f"📋 Likumi.lv digest — {today}",
+        "description": f"**{count}** laws found today{note}",
+        "color":       0x3498DB,
+        "timestamp":   datetime.utcnow().isoformat() + "Z",
+        "footer":      {"text": "likumi.lv monitor · automatic daily check"}
+    }
+    post_embeds_to_discord([header_embed])
 
-    # Split into groups of 9 (1 header + 9 laws = 10 max per message)
-    chunk_size = 9
-    chunks = [all_embeds[i:i + chunk_size] for i in range(0, len(all_embeds), chunk_size)]
+    # Send each law as its own message — avoids the 6000 char total limit
+    for index, item in enumerate(results):
+        embed = build_law_embed(item)
 
-    for index, chunk in enumerate(chunks):
-        if index == 0:
-            # Show note if we are showing laws from a previous day
-            note = f"\n_(Laws from {laws_date} — most recent available)_" if laws_date != today else ""
-            header = {
-                "title":       f"📋 Likumi.lv digest — {today}",
-                "description": f"**{count}** laws found{note}",
-                "color":       0x3498DB,
-                "timestamp":   datetime.utcnow().isoformat() + "Z",
-                "footer":      {"text": "likumi.lv monitor · automatic daily check"}
-            }
-        else:
-            header = {
-                "title":       f"📋 Likumi.lv digest — {today} (part {index + 1})",
-                "description": f"Laws {index * chunk_size + 1}–{index * chunk_size + len(chunk)}",
-                "color":       0x3498DB
-            }
+        # Truncate long fields to stay within Discord single embed limits
+        if embed.get("description"):
+            embed["description"] = embed["description"][:300]
+        for field in embed.get("fields", []):
+            if field["name"] == "Why it matters":
+                field["value"] = field["value"][:200]
 
-        post_embeds_to_discord([header] + chunk)
-        logger.info(f"Sent part {index + 1}/{len(chunks)} to Discord")
+        post_embeds_to_discord([embed])
+        logger.info(f"Sent law {index + 1}/{count} to Discord")
 
     logger.info(f"Done — {count} laws sent to Discord.")
 
