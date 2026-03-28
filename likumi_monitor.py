@@ -40,8 +40,8 @@ LIKUMI_MOBILE_URL = "https://m.likumi.lv/jaunakie.php"
 SEEN_FILE = "seen_laws.json"  # stores IDs of already processed laws
 
 GEMINI_PROMPT = """
-You answer in Latvian. You are an expert in Latvian law and an IT security auditor assistant.
-Read this law title and look into the linked text of the law and give a short analysis.
+You are an expert in Latvian law and an IT security auditor assistant.
+Read this law title and give a short analysis.
 Reply ONLY with valid JSON, no extra text, no markdown.
 
 Law title: {title}
@@ -290,12 +290,23 @@ def send_to_discord(results: list[dict], laws_date: str):
     today  = date.today().strftime("%d.%m.%Y")
     count  = len(results)
 
+    # If no high relevance laws — send a short message and stop
+    if count == 0:
+        post_embeds_to_discord([{
+            "title":       f"📋 Likumi.lv — {today}",
+            "description": "No relevant laws today. Nothing requires your attention.",
+            "color":       0x95A5A6,
+            "footer":      {"text": "likumi.lv monitor · automatic daily check"}
+        }])
+        logger.info("No high relevance laws today — sent empty digest.")
+        return
+
     # Send the header message first
     note = f"\n_(Laws from {laws_date} — most recent available)_" if laws_date != today else ""
     header_embed = {
         "title":       f"📋 Likumi.lv digest — {today}",
-        "description": f"**{count}** laws found today{note}",
-        "color":       0x3498DB,
+        "description": f"🔴 **{count}** relevant law(s) found today{note}",
+        "color":       0xE74C3C,
         "timestamp":   datetime.utcnow().isoformat() + "Z",
         "footer":      {"text": "likumi.lv monitor · automatic daily check"}
     }
@@ -314,6 +325,9 @@ def send_to_discord(results: list[dict], laws_date: str):
 
         post_embeds_to_discord([embed])
         logger.info(f"Sent law {index + 1}/{count} to Discord")
+
+        # Wait 1 second between messages — Discord rate limit is ~5 messages/second
+        time.sleep(1)
 
     logger.info(f"Done — {count} laws sent to Discord.")
 
@@ -367,12 +381,12 @@ def likumi_monitor_flow():
         analysis = analyze_with_gemini(law)
         results.append({"law": law, "analysis": analysis})
 
-    # Sort: high relevance first
-    order = {"high": 0, "medium": 1, "low": 2}
-    results.sort(key=lambda x: order.get(x["analysis"].get("relevance", "low"), 2))
+    # Keep only high relevance laws — these are the ones that matter for a bank or IT security
+    high_relevance = [r for r in results if r["analysis"].get("relevance") == "high"]
 
-    # Task 4: Send to Discord
-    send_to_discord(results, laws_date)
+    # Task 4: Send to Discord — only high relevance laws
+    # If none found, send a short "nothing relevant today" message
+    send_to_discord(high_relevance, laws_date)
 
     # Task 5: Save IDs so we don't send the same laws again tomorrow
     new_ids = {law["id"] for law in new_laws}
