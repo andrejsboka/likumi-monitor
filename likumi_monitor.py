@@ -41,7 +41,7 @@ SEEN_FILE = "seen_laws.json"  # stores IDs of already processed laws
 
 GEMINI_PROMPT = """
 You are an expert in Latvian law and an IT security auditor assistant.
-Read this law title and give a short analysis.
+Read this law and give a short analysis in Latvian.
 Reply ONLY with valid JSON, no extra text, no markdown.
 
 Law title: {title}
