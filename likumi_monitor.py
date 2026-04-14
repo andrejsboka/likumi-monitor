@@ -48,10 +48,9 @@ Law title: {title}
 URL: {url}
 
 {{
-  "summary": "2-3 sentences: what this law is about and what it changes",
+  "summary": "what this law is about and what it changes",
   "sector": "finance / IT / general / other",
   "relevance": "high / medium / low",
-  "relevance_reason": "short reason why this matters or not for a bank or IT security",
   "keywords": ["keyword 1", "keyword 2", "keyword 3"]
 }}
 """
@@ -257,9 +256,7 @@ def build_law_embed(item: dict) -> dict:
         "color":       color,
         "fields": [
             {"name": "Sector",        "value": analysis.get("sector", "—"),                   "inline": True},
-            {"name": "Relevance",     "value": f"{emoji} {relevance}",                        "inline": True},
-            {"name": "Keywords",      "value": keywords if keywords else "—",                 "inline": False},
-            {"name": "Why it matters","value": analysis.get("relevance_reason", "—")[:500],   "inline": False}
+            {"name": "Relevance",     "value": f"{emoji} {relevance}",                        "inline": True}
         ]
     }
 
